@@ -7,12 +7,12 @@ Cross-platform tool that captures your screen while you work, then uses Claude A
 ## ✨ Features
 
 - 🖥️ **Multi-monitor support** - Capture all monitors or specific ones
-- 🤖 **AI-powered summaries** - Claude analyzes your screenshots to understand what you did
+- 🤖 **AI-powered summaries** - Analyze screenshots locally with Claude Code
 - ⏱️ **Automatic capture** - Set interval (default: 30 seconds)
 - 📊 **Detailed metadata** - Track duration, monitor usage, and timestamps
 - 🔄 **Cross-platform** - Works on Linux, Windows, and macOS
-- 💾 **Offline-first** - Screenshots saved locally, AI optional
-- 🎯 **Jira integration** - Post summaries directly to Jira tasks
+- 💾 **Local-first** - All screenshots and analysis stay on your machine
+- 📝 **Review files** - Generates markdown files ready for Claude Code analysis
 
 ## 🚀 Quick Start
 
@@ -48,17 +48,9 @@ make install
 
 ### Configuration
 
-Set your Anthropic API key:
+No configuration needed! Task Tracker works out of the box.
 
-```bash
-# Linux/Mac
-export ANTHROPIC_API_KEY="sk-ant-your-key-here"
-
-# Windows (PowerShell)
-$env:ANTHROPIC_API_KEY="sk-ant-your-key-here"
-```
-
-For persistence, add to `~/.bashrc`, `~/.zshrc`, or Windows Environment Variables.
+For AI analysis, you'll use Claude Code locally after capture is complete.
 
 ### First Run
 
@@ -79,7 +71,12 @@ task-tracker start "Implement login feature"
 
 4. Work on your task, press `Ctrl+C` when done
 
-5. Get instant AI summary! 🎉
+5. **Analyze with Claude Code**:
+```bash
+claude-code task_captures/[session_id]/review.md
+```
+
+6. Get your AI summary! 🎉
 
 ## 📖 Usage
 
@@ -95,8 +92,8 @@ task-tracker start "Task description"
 - The tool will automatically:
   - Stop capturing
   - Save metadata.json
-  - Generate AI summary
-  - Display results
+  - Generate review.md file with screenshots
+  - Display instructions for Claude Code analysis
 
 **Note:** Ctrl+C is handled gracefully - your data is safe!
 
@@ -111,9 +108,15 @@ task-tracker start "Meeting notes" --monitors primary
 task-tracker start "Bug fix" --interval 60  # Capture every 60 seconds
 ```
 
-**Analyze existing session:**
+**Generate review file for existing session:**
 ```bash
 task-tracker analyze 20240104_143022
+```
+
+**Analyze with Claude Code:**
+```bash
+# After generating review file
+claude-code task_captures/20240104_143022/review.md
 ```
 
 ### Monitor Helper Commands
@@ -184,7 +187,7 @@ task_captures/
     ├── screen_m2_143022.png    # Monitor 2
     ├── screen_m2_143052.png
     ├── metadata.json            # Session info
-    └── summary.txt              # AI-generated summary
+    └── review.md                # Review file for Claude Code analysis
 ```
 
 ## 🔨 Building
@@ -251,9 +254,11 @@ go build -o monitor-helper.exe monitor-helper.go
 
 ### Environment Variables
 
-- `ANTHROPIC_API_KEY` - Your Claude API key (required for AI summaries)
-- `JIRA_URL` - Your Jira instance URL (optional)
-- `JIRA_API_TOKEN` - Your Jira API token (optional)
+No environment variables required! Task Tracker works completely offline.
+
+Optional (for future features):
+- `JIRA_URL` - Your Jira instance URL
+- `JIRA_API_TOKEN` - Your Jira API token
 
 ### Command-Line Options
 
@@ -262,41 +267,39 @@ go build -o monitor-helper.exe monitor-helper.go
   - Options: `all`, `primary`, `1`, `1,2`, `2,3`, etc.
 - `--interval, -i` - Capture interval in seconds (default: 30)
 
-## 🤖 AI Summarization
+## 🤖 AI Analysis with Claude Code
 
-Claude analyzes your screenshots to provide:
-- What was accomplished
-- Key activities observed
-- Technologies and tools used
-- How different monitors/windows were used
-- Work progression over time
-- Suggested Jira summary (2-3 sentences)
+After capture, Task Tracker generates a `review.md` file containing:
+- Session metadata (task name, duration, screenshot count)
+- Sampled screenshots with timestamps
+- Analysis prompt for Claude
 
-**Example Summary:**
-```
-## What was accomplished
-Implemented user authentication API endpoints including login,
-registration, and password reset functionality. Added JWT token
-generation and validation middleware.
+**How to analyze:**
 
-## Key activities
-- Created Express.js route handlers for auth endpoints
-- Integrated MongoDB user model with Mongoose
-- Implemented bcrypt password hashing
-- Added JWT token generation with expiration
-- Tested endpoints using Postman
+1. **Capture your work session:**
+   ```bash
+   task-tracker start "Implement authentication"
+   # Work... then Ctrl+C
+   ```
 
-## Technologies/Tools used
-- VS Code for development
-- Postman for API testing
-- MongoDB Compass for database inspection
-- Chrome browser for documentation
+2. **Open in Claude Code:**
+   ```bash
+   claude-code task_captures/[session_id]/review.md
+   ```
 
-## Suggested Jira summary
-Completed user authentication API with login, registration, and
-password reset endpoints. Implemented JWT tokens and bcrypt
-password hashing. All endpoints tested and working correctly.
-```
+3. **Claude will analyze and provide:**
+   - What was accomplished
+   - Key activities observed
+   - Technologies and tools used
+   - How different monitors/windows were used
+   - Work progression over time
+   - Suggested Jira summary (2-3 sentences)
+
+**Why Claude Code?**
+- ✅ **Local analysis** - No API calls, complete privacy
+- ✅ **Interactive** - Ask follow-up questions
+- ✅ **Context-aware** - Claude can see your full codebase
+- ✅ **Free** - No API costs
 
 ## 📊 Use Cases
 
@@ -327,19 +330,18 @@ task-tracker start "Learn React Hooks" --monitors 1,2
 
 ## 🔐 Privacy & Security
 
-- **Local-first**: All screenshots stored locally on your machine
-- **Selective sharing**: Only sampled screenshots sent to Claude (5 by default)
-- **API key security**: Never hardcode API keys, use environment variables
+- **100% Local**: All screenshots stored locally on your machine
+- **No API calls**: Analysis happens in Claude Code locally
 - **Monitor selection**: Capture only the monitors you want
 - **Manual control**: You decide when to start and stop
+- **Your data stays yours**: Nothing is sent to external servers
 
 ### Privacy Best Practices
 
 1. **Don't capture sensitive monitors**: Use `--monitors` to exclude screens with sensitive data
-2. **Review before sharing**: Check screenshots before generating AI summaries
-3. **Secure API keys**: Store in environment variables or secure vaults
-4. **Clean up**: Regularly delete old capture sessions
-5. **Encrypt sensitive sessions**: Use tools like `age` or `gpg` to encrypt folders
+2. **Review before analysis**: Check screenshots before opening in Claude Code
+3. **Clean up**: Regularly delete old capture sessions
+4. **Encrypt sensitive sessions**: Use tools like `age` or `gpg` to encrypt folders
 
 ## 🛠️ Troubleshooting
 
@@ -376,12 +378,6 @@ chmod +x task-tracker monitor-helper
 3. Add Terminal or your terminal app
 
 ### General Issues
-
-**"API key not set" warning:**
-```bash
-export ANTHROPIC_API_KEY="your-key-here"
-# Add to ~/.bashrc for persistence
-```
 
 **High disk usage:**
 - Screenshots are compressed PNGs

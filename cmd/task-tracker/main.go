@@ -6,13 +6,9 @@
 package main
 
 import (
-	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"image/png"
-	"io"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -58,7 +54,6 @@ type TaskTracker struct {
 	MonitorsToCapture []int
 	StartTime         time.Time
 	EndTime           time.Time
-	AnthropicAPIKey   string
 }
 
 // NewTaskTracker creates a new tracker instance
@@ -70,11 +65,6 @@ func NewTaskTracker(outputDir, monitors string) (*TaskTracker, error) {
 		return nil, fmt.Errorf("failed to create session directory: %w", err)
 	}
 
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-	if apiKey == "" {
-		fmt.Println("⚠️  Warning: ANTHROPIC_API_KEY not set. AI summarization will be disabled.")
-	}
-
 	tracker := &TaskTracker{
 		OutputDir:       outputDir,
 		SessionID:       sessionID,
@@ -83,7 +73,6 @@ func NewTaskTracker(outputDir, monitors string) (*TaskTracker, error) {
 		IsCapturing:     false,
 		CaptureInterval: 30 * time.Second,
 		MonitorsConfig:  monitors,
-		AnthropicAPIKey: apiKey,
 	}
 
 	tracker.setupMonitors()
@@ -263,159 +252,47 @@ func (t *TaskTracker) saveMetadata() error {
 	return os.WriteFile(metadataPath, data, 0644)
 }
 
-// Claude API structures
-type ClaudeMessage struct {
-	Role    string               `json:"role"`
-	Content []ClaudeContentBlock `json:"content"`
-}
-
-type ClaudeContentBlock struct {
-	Type   string             `json:"type"`
-	Text   string             `json:"text,omitempty"`
-	Source *ClaudeImageSource `json:"source,omitempty"`
-}
-
-type ClaudeImageSource struct {
-	Type      string `json:"type"`
-	MediaType string `json:"media_type"`
-	Data      string `json:"data"`
-}
-
-type ClaudeRequest struct {
-	Model     string          `json:"model"`
-	MaxTokens int             `json:"max_tokens"`
-	Messages  []ClaudeMessage `json:"messages"`
-}
-
-type ClaudeResponse struct {
-	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"content"`
-}
-
-// Summarize with Claude
-func (t *TaskTracker) SummarizeWithClaude(sampleCount int) (string, error) {
-	if t.AnthropicAPIKey == "" {
-		return "", fmt.Errorf("ANTHROPIC_API_KEY not set")
-	}
-
-	fmt.Println("\n🤖 Generating summary with Claude...")
-
-	// Sample screenshots evenly
+// Generate review file for Claude Code analysis
+func (t *TaskTracker) GenerateReviewFile(sampleCount int) error {
 	selected := t.sampleScreenshots(sampleCount)
-	fmt.Printf("   Selected %d screenshots for analysis\n", len(selected))
 
-	// Prepare content blocks
-	contentBlocks := []ClaudeContentBlock{}
-
-	for _, shot := range selected {
-		// Read and encode image
-		imgData, err := os.ReadFile(shot.Path)
-		if err != nil {
-			fmt.Printf("⚠️  Failed to read %s: %v\n", shot.Path, err)
-			continue
-		}
-
-		base64Data := base64.StdEncoding.EncodeToString(imgData)
-
-		contentBlocks = append(contentBlocks, ClaudeContentBlock{
-			Type: "image",
-			Source: &ClaudeImageSource{
-				Type:      "base64",
-				MediaType: "image/png",
-				Data:      base64Data,
-			},
-		})
-	}
-
-	// Create prompt
 	duration := t.EndTime.Sub(t.StartTime).Minutes()
-	prompt := fmt.Sprintf(`I need you to analyze these %d screenshots from a work session.
 
-Task Name: %s
-Duration: %.1f minutes
-Total Screenshots: %d
+	var md strings.Builder
+	md.WriteString("# Task Analysis Review\n\n")
+	md.WriteString(fmt.Sprintf("**Task Name:** %s\n", t.TaskName))
+	md.WriteString(fmt.Sprintf("**Session ID:** %s\n", t.SessionID))
+	md.WriteString(fmt.Sprintf("**Duration:** %.1f minutes\n", duration))
+	md.WriteString(fmt.Sprintf("**Total Screenshots:** %d\n", len(t.Screenshots)))
+	md.WriteString(fmt.Sprintf("**Sampled Screenshots:** %d\n\n", len(selected)))
 
-Please provide:
-1. **What was accomplished**: A clear summary of the work done
-2. **Key activities**: Main tasks or workflows observed
-3. **Technologies/Tools used**: What applications or systems were visible
-4. **Workspace organization**: How different monitors/windows were used (if multi-monitor)
-5. **Progression**: How the work evolved over time
-6. **Suggested Jira summary**: A concise 2-3 sentence summary suitable for a Jira task update
-
-Be specific and focus on the actual work visible in the screenshots.`,
-		len(selected), t.TaskName, duration, len(t.Screenshots))
-
-	contentBlocks = append(contentBlocks, ClaudeContentBlock{
-		Type: "text",
-		Text: prompt,
-	})
-
-	// Prepare request
-	request := ClaudeRequest{
-		Model:     "claude-sonnet-4-5-20250929",
-		MaxTokens: 2000,
-		Messages: []ClaudeMessage{
-			{
-				Role:    "user",
-				Content: contentBlocks,
-			},
-		},
+	md.WriteString("## Screenshots for Analysis\n\n")
+	for i, shot := range selected {
+		md.WriteString(fmt.Sprintf("### Screenshot %d (%.1f min)\n", i+1, shot.RelativeTime/60))
+		md.WriteString(fmt.Sprintf("- **Monitor:** %d\n", shot.Monitor))
+		md.WriteString(fmt.Sprintf("- **Resolution:** %s\n", shot.Resolution))
+		md.WriteString(fmt.Sprintf("- **Timestamp:** %s\n\n", shot.Timestamp))
+		md.WriteString(fmt.Sprintf("![Screenshot](%s)\n\n", shot.Path))
 	}
 
-	requestBody, err := json.Marshal(request)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
+	md.WriteString("\n---\n\n")
+	md.WriteString("## Analysis Prompt\n\n")
+	md.WriteString("Please analyze the screenshots above and provide:\n\n")
+	md.WriteString("1. **What was accomplished**: A clear summary of the work done\n")
+	md.WriteString("2. **Key activities**: Main tasks or workflows observed\n")
+	md.WriteString("3. **Technologies/Tools used**: What applications or systems were visible\n")
+	md.WriteString("4. **Workspace organization**: How different monitors/windows were used (if multi-monitor)\n")
+	md.WriteString("5. **Progression**: How the work evolved over time\n")
+	md.WriteString("6. **Suggested Jira summary**: A concise 2-3 sentence summary suitable for a Jira task update\n\n")
+	md.WriteString("Be specific and focus on the actual work visible in the screenshots.\n")
+
+	reviewPath := filepath.Join(t.SessionDir, "review.md")
+	if err := os.WriteFile(reviewPath, []byte(md.String()), 0644); err != nil {
+		return fmt.Errorf("failed to save review file: %w", err)
 	}
 
-	// Call Claude API
-	req, err := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(requestBody))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", t.AnthropicAPIKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to call Claude API: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Claude API error (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	// Parse response
-	var claudeResp ClaudeResponse
-	if err := json.Unmarshal(body, &claudeResp); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if len(claudeResp.Content) == 0 {
-		return "", fmt.Errorf("no content in Claude response")
-	}
-
-	summary := claudeResp.Content[0].Text
-
-	// Save summary
-	summaryPath := filepath.Join(t.SessionDir, "summary.txt")
-	if err := os.WriteFile(summaryPath, []byte(summary), 0644); err != nil {
-		return "", fmt.Errorf("failed to save summary: %w", err)
-	}
-
-	fmt.Printf("\n✅ Summary saved to: %s\n", summaryPath)
-	return summary, nil
+	fmt.Printf("\n✅ Review file generated: %s\n", reviewPath)
+	return nil
 }
 
 // Sample screenshots evenly
@@ -491,19 +368,20 @@ func main() {
 				os.Exit(1)
 			}
 
-			// Generate summary
+			// Generate review file
 			fmt.Println("\n" + strings.Repeat("=", 50))
-			fmt.Println("Starting analysis...")
+			fmt.Println("Generating review file for Claude Code analysis...")
 
-			summary, err := tracker.SummarizeWithClaude(5)
-			if err != nil {
-				fmt.Printf("⚠️  Failed to generate summary: %v\n", err)
-				fmt.Println("\nSession data saved. You can analyze later with:")
-				fmt.Printf("  task-tracker analyze %s\n", tracker.SessionID)
+			if err := tracker.GenerateReviewFile(5); err != nil {
+				fmt.Printf("⚠️  Failed to generate review file: %v\n", err)
 			} else {
+				reviewPath := filepath.Join(tracker.SessionDir, "review.md")
 				fmt.Println("\n" + strings.Repeat("=", 50))
-				fmt.Println("SUMMARY:")
-				fmt.Println(summary)
+				fmt.Println("📝 NEXT STEPS:")
+				fmt.Println("\nTo analyze your session in Claude Code, run:")
+				fmt.Printf("  claude-code \"%s\"\n", reviewPath)
+				fmt.Println("\nOr open the file in your editor and paste it into Claude Code.")
+				fmt.Println("The review file contains all screenshots and an analysis prompt.")
 			}
 		},
 	}
@@ -526,7 +404,7 @@ This command is here for completeness but Ctrl+C is the recommended way to stop.
 	// Analyze command
 	var analyzeCmd = &cobra.Command{
 		Use:   "analyze [session_id]",
-		Short: "Analyze an existing capture session",
+		Short: "Generate review file for an existing capture session",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			sessionID := args[0]
@@ -548,26 +426,28 @@ This command is here for completeness but Ctrl+C is the recommended way to stop.
 
 			// Reconstruct tracker
 			tracker := &TaskTracker{
-				SessionID:       metadata.SessionID,
-				SessionDir:      sessionDir,
-				TaskName:        metadata.TaskName,
-				Screenshots:     metadata.Screenshots,
-				AnthropicAPIKey: os.Getenv("ANTHROPIC_API_KEY"),
+				SessionID:   metadata.SessionID,
+				SessionDir:  sessionDir,
+				TaskName:    metadata.TaskName,
+				Screenshots: metadata.Screenshots,
 			}
 
 			tracker.StartTime, _ = time.Parse(time.RFC3339, metadata.StartTime)
 			tracker.EndTime, _ = time.Parse(time.RFC3339, metadata.EndTime)
 
-			// Analyze
-			summary, err := tracker.SummarizeWithClaude(5)
-			if err != nil {
-				fmt.Printf("❌ Failed to generate summary: %v\n", err)
+			// Generate review file
+			fmt.Println("Generating review file for Claude Code analysis...")
+			if err := tracker.GenerateReviewFile(5); err != nil {
+				fmt.Printf("❌ Failed to generate review file: %v\n", err)
 				os.Exit(1)
 			}
 
+			reviewPath := filepath.Join(sessionDir, "review.md")
 			fmt.Println("\n" + strings.Repeat("=", 50))
-			fmt.Println("SUMMARY:")
-			fmt.Println(summary)
+			fmt.Println("📝 NEXT STEPS:")
+			fmt.Println("\nTo analyze your session in Claude Code, run:")
+			fmt.Printf("  claude-code \"%s\"\n", reviewPath)
+			fmt.Println("\nOr open the file in your editor and paste it into Claude Code.")
 		},
 	}
 
