@@ -90,6 +90,16 @@ task-tracker start "Implement login feature"
 task-tracker start "Task description"
 ```
 
+**Stop tracking:**
+- Press `Ctrl+C` - **This is the recommended way!**
+- The tool will automatically:
+  - Stop capturing
+  - Save metadata.json
+  - Generate AI summary
+  - Display results
+
+**Note:** Ctrl+C is handled gracefully - your data is safe!
+
 **Capture specific monitors:**
 ```bash
 task-tracker start "Code review" --monitors 1,2
@@ -402,9 +412,9 @@ MIT License - see LICENSE file for details
 
 ## 📞 Support
 
-- 📖 Documentation: [GitHub Wiki](https://github.com/abhishekunotech/task-tracker/wiki)
-- 🐛 Issues: [GitHub Issues](https://github.com/abhishekunotech/task-tracker/issues)
-- 💬 Discussions: [GitHub Discussions](https://github.com/abhishekunotech/task-tracker/discussions)
+- 📖 Documentation: [GitHub Wiki](https://github.com/yourusername/task-tracker/wiki)
+- 🐛 Issues: [GitHub Issues](https://github.com/yourusername/task-tracker/issues)
+- 💬 Discussions: [GitHub Discussions](https://github.com/yourusername/task-tracker/discussions)
 
 ## 🗺️ Roadmap
 

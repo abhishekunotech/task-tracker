@@ -1,9 +1,9 @@
-package main
-
 // Task Tracker - Cross-platform screen capture and AI summarization
 // Build: go build -o task-tracker main.go
 // Linux: go build -o task-tracker-linux main.go
 // Windows: GOOS=windows GOARCH=amd64 go build -o task-tracker.exe main.go
+
+package main
 
 import (
 	"bytes"
@@ -14,9 +14,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/kbinani/screenshot"
@@ -461,21 +463,35 @@ func main() {
 				taskName = args[0]
 			}
 
-			// Handle Ctrl+C gracefully
+			// Set up signal handling for graceful shutdown
+			sigChan := make(chan os.Signal, 1)
+			signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+			// Start capture in a goroutine
+			done := make(chan error, 1)
 			go func() {
-				// Simple signal handling
-				var input string
-				fmt.Scanln(&input)
+				done <- tracker.StartCapture(taskName)
 			}()
 
-			if err := tracker.StartCapture(taskName); err != nil {
-				fmt.Printf("❌ Error during capture: %v\n", err)
+			// Wait for either completion or interrupt signal
+			select {
+			case <-sigChan:
+				fmt.Println("\n\n⏸️  Interrupt received, stopping capture...")
+				tracker.IsCapturing = false
+			case err := <-done:
+				if err != nil {
+					fmt.Printf("❌ Error during capture: %v\n", err)
+					os.Exit(1)
+				}
+			}
+
+			// Stop capture and save metadata
+			if err := tracker.StopCapture(); err != nil {
+				fmt.Printf("❌ Error stopping capture: %v\n", err)
 				os.Exit(1)
 			}
 
-			// After stopping (Ctrl+C), analyze
-			tracker.StopCapture()
-
+			// Generate summary
 			fmt.Println("\n" + strings.Repeat("=", 50))
 			fmt.Println("Starting analysis...")
 
@@ -494,6 +510,18 @@ func main() {
 
 	startCmd.Flags().StringP("monitors", "m", "all", "Monitors to capture (all, primary, 1, 1,2, etc.)")
 	startCmd.Flags().IntP("interval", "i", 30, "Capture interval in seconds")
+
+	// Stop command (for stopping a running session)
+	var stopCmd = &cobra.Command{
+		Use:   "stop",
+		Short: "Stop the current capture session gracefully",
+		Long: `Stop command is not needed if using Ctrl+C, which now properly saves metadata.
+This command is here for completeness but Ctrl+C is the recommended way to stop.`,
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Println("💡 Tip: You can stop capture by pressing Ctrl+C")
+			fmt.Println("   Metadata and summary will be generated automatically")
+		},
+	}
 
 	// Analyze command
 	var analyzeCmd = &cobra.Command{
@@ -545,6 +573,7 @@ func main() {
 
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(analyzeCmd)
+	rootCmd.AddCommand(stopCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
