@@ -1,0 +1,22 @@
+{
+  "coding": {
+    "monitors": "1,2",
+    "description": "Code editor on monitor 1, browser/docs on monitor 2",
+    "created": "2024-01-04 14:30:22"
+  },
+  "design": {
+    "monitors": "all",
+    "description": "Design work with references across all monitors",
+    "created": "2024-01-04 14:31:15"
+  },
+  "meeting": {
+    "monitors": "primary",
+    "description": "Video call and notes on primary monitor only",
+    "created": "2024-01-04 14:32:08"
+  },
+  "testing": {
+    "monitors": "1,2,3",
+    "description": "Code, browser, and terminal across three monitors",
+    "created": "2024-01-04 14:33:45"
+  }
+}
