@@ -139,7 +139,7 @@ func (t *TaskTracker) StartCapture(taskName string) error {
 
 	fmt.Printf("🎬 Started capturing for: %s\n", t.TaskName)
 	fmt.Printf("📁 Saving to: %s\n", t.SessionDir)
-	fmt.Println("Press Ctrl+C when done\n")
+	fmt.Println("Press Ctrl+C when done")
 
 	// Capture loop
 	ticker := time.NewTicker(t.CaptureInterval)
