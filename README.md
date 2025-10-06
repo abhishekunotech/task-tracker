@@ -73,7 +73,7 @@ task-tracker start "Implement login feature"
 
 5. **Analyze with Claude Code**:
 ```bash
-claude-code task_captures/[session_id]/review.md
+claude task_captures/[session_id]/review.md
 ```
 
 6. Get your AI summary! 🎉
@@ -116,7 +116,7 @@ task-tracker analyze 20240104_143022
 **Analyze with Claude Code:**
 ```bash
 # After generating review file
-claude-code task_captures/20240104_143022/review.md
+claude task_captures/20240104_143022/review.md
 ```
 
 ### Monitor Helper Commands
@@ -284,7 +284,7 @@ After capture, Task Tracker generates a `review.md` file containing:
 
 2. **Open in Claude Code:**
    ```bash
-   claude-code task_captures/[session_id]/review.md
+   claude task_captures/[session_id]/review.md
    ```
 
 3. **Claude will analyze and provide:**

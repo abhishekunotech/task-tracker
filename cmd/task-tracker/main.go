@@ -39,6 +39,9 @@ type SessionMetadata struct {
 	DurationSeconds float64      `json:"duration_seconds"`
 	ScreenshotCount int          `json:"screenshot_count"`
 	Screenshots     []Screenshot `json:"screenshots"`
+	JiraTicket      string       `json:"jira_ticket,omitempty"`
+	TimeSpent       string       `json:"time_spent,omitempty"`
+	JiraComment     string       `json:"jira_comment,omitempty"`
 }
 
 // TaskTracker main structure
@@ -54,6 +57,9 @@ type TaskTracker struct {
 	MonitorsToCapture []int
 	StartTime         time.Time
 	EndTime           time.Time
+	JiraTicket        string
+	TimeSpent         string
+	JiraComment       string
 }
 
 // NewTaskTracker creates a new tracker instance
@@ -241,6 +247,9 @@ func (t *TaskTracker) saveMetadata() error {
 		DurationSeconds: t.EndTime.Sub(t.StartTime).Seconds(),
 		ScreenshotCount: len(t.Screenshots),
 		Screenshots:     t.Screenshots,
+		JiraTicket:      t.JiraTicket,
+		TimeSpent:       t.TimeSpent,
+		JiraComment:     t.JiraComment,
 	}
 
 	data, err := json.MarshalIndent(metadata, "", "  ")
@@ -312,6 +321,51 @@ func (t *TaskTracker) sampleScreenshots(count int) []Screenshot {
 	return selected
 }
 
+// Generate Bitbucket smart commit message for Jira
+func (t *TaskTracker) GenerateSmartCommit() string {
+	if t.JiraTicket == "" {
+		return ""
+	}
+
+	var commitMsg strings.Builder
+	commitMsg.WriteString(fmt.Sprintf("[%s]", t.JiraTicket))
+
+	// Calculate time spent if not provided
+	timeSpent := t.TimeSpent
+	if timeSpent == "" {
+		duration := t.EndTime.Sub(t.StartTime)
+		hours := int(duration.Hours())
+		minutes := int(duration.Minutes()) % 60
+
+		if hours > 0 {
+			timeSpent = fmt.Sprintf("%dh %dm", hours, minutes)
+		} else {
+			timeSpent = fmt.Sprintf("%dm", minutes)
+		}
+	}
+
+	commitMsg.WriteString(fmt.Sprintf(" #time %s", timeSpent))
+
+	if t.JiraComment != "" {
+		commitMsg.WriteString(fmt.Sprintf(" #comment %s", t.JiraComment))
+	} else if t.TaskName != "" {
+		commitMsg.WriteString(fmt.Sprintf(" #comment %s", t.TaskName))
+	}
+
+	return commitMsg.String()
+}
+
+// Save smart commit message to file
+func (t *TaskTracker) SaveSmartCommit() error {
+	smartCommit := t.GenerateSmartCommit()
+	if smartCommit == "" {
+		return nil
+	}
+
+	commitPath := filepath.Join(t.SessionDir, "smart_commit.txt")
+	return os.WriteFile(commitPath, []byte(smartCommit), 0644)
+}
+
 func main() {
 	var rootCmd = &cobra.Command{
 		Use:   "task-tracker",
@@ -326,6 +380,8 @@ func main() {
 		Run: func(cmd *cobra.Command, args []string) {
 			monitors, _ := cmd.Flags().GetString("monitors")
 			interval, _ := cmd.Flags().GetInt("interval")
+			jiraTicket, _ := cmd.Flags().GetString("ticket")
+			timeSpent, _ := cmd.Flags().GetString("time")
 
 			tracker, err := NewTaskTracker("task_captures", monitors)
 			if err != nil {
@@ -334,6 +390,8 @@ func main() {
 			}
 
 			tracker.CaptureInterval = time.Duration(interval) * time.Second
+			tracker.JiraTicket = jiraTicket
+			tracker.TimeSpent = timeSpent
 
 			taskName := ""
 			if len(args) > 0 {
@@ -378,16 +436,23 @@ func main() {
 				reviewPath := filepath.Join(tracker.SessionDir, "review.md")
 				fmt.Println("\n" + strings.Repeat("=", 50))
 				fmt.Println("📝 NEXT STEPS:")
-				fmt.Println("\nTo analyze your session in Claude Code, run:")
-				fmt.Printf("  claude-code \"%s\"\n", reviewPath)
-				fmt.Println("\nOr open the file in your editor and paste it into Claude Code.")
-				fmt.Println("The review file contains all screenshots and an analysis prompt.")
+				fmt.Println("\n1. Analyze your session in Claude Code:")
+				fmt.Printf(" claude \"%s\"\n", reviewPath)
+
+				if tracker.JiraTicket != "" {
+					fmt.Println("\n2. After getting the AI summary, generate smart commit:")
+					fmt.Printf("   ./task-tracker commit %s \"<AI generated summary>\"\n", tracker.SessionID)
+				}
+
+				fmt.Println("\nThe review file contains all screenshots and an analysis prompt.")
 			}
 		},
 	}
 
 	startCmd.Flags().StringP("monitors", "m", "all", "Monitors to capture (all, primary, 1, 1,2, etc.)")
 	startCmd.Flags().IntP("interval", "i", 30, "Capture interval in seconds")
+	startCmd.Flags().StringP("ticket", "t", "", "Jira ticket ID (e.g., CYM-2945)")
+	startCmd.Flags().String("time", "", "Time spent (e.g., 1h 20m) - auto-calculated if not provided")
 
 	// Stop command (for stopping a running session)
 	var stopCmd = &cobra.Command{
@@ -430,6 +495,9 @@ This command is here for completeness but Ctrl+C is the recommended way to stop.
 				SessionDir:  sessionDir,
 				TaskName:    metadata.TaskName,
 				Screenshots: metadata.Screenshots,
+				JiraTicket:  metadata.JiraTicket,
+				TimeSpent:   metadata.TimeSpent,
+				JiraComment: metadata.JiraComment,
 			}
 
 			tracker.StartTime, _ = time.Parse(time.RFC3339, metadata.StartTime)
@@ -446,13 +514,73 @@ This command is here for completeness but Ctrl+C is the recommended way to stop.
 			fmt.Println("\n" + strings.Repeat("=", 50))
 			fmt.Println("📝 NEXT STEPS:")
 			fmt.Println("\nTo analyze your session in Claude Code, run:")
-			fmt.Printf("  claude-code \"%s\"\n", reviewPath)
+			fmt.Printf("  claude \"%s\"\n", reviewPath)
 			fmt.Println("\nOr open the file in your editor and paste it into Claude Code.")
+		},
+	}
+
+	// Commit command - generate smart commit after AI analysis
+	var commitCmd = &cobra.Command{
+		Use:   "commit [session_id] [summary]",
+		Short: "Generate Bitbucket smart commit message with AI-generated summary",
+		Long: `Generate a Bitbucket smart commit message for Jira integration.
+Use this after analyzing the session with Claude Code to include the AI-generated summary.`,
+		Args: cobra.ExactArgs(2),
+		Run: func(cmd *cobra.Command, args []string) {
+			sessionID := args[0]
+			summary := args[1]
+			sessionDir := filepath.Join("task_captures", sessionID)
+
+			// Load metadata
+			metadataPath := filepath.Join(sessionDir, "metadata.json")
+			data, err := os.ReadFile(metadataPath)
+			if err != nil {
+				fmt.Printf("❌ Failed to load session: %v\n", err)
+				os.Exit(1)
+			}
+
+			var metadata SessionMetadata
+			if err := json.Unmarshal(data, &metadata); err != nil {
+				fmt.Printf("❌ Failed to parse metadata: %v\n", err)
+				os.Exit(1)
+			}
+
+			if metadata.JiraTicket == "" {
+				fmt.Println("❌ No Jira ticket found for this session")
+				fmt.Println("💡 Tip: Use --ticket flag when starting the capture")
+				os.Exit(1)
+			}
+
+			// Create tracker with updated comment
+			tracker := &TaskTracker{
+				SessionID:   metadata.SessionID,
+				SessionDir:  sessionDir,
+				JiraTicket:  metadata.JiraTicket,
+				TimeSpent:   metadata.TimeSpent,
+				JiraComment: summary,
+			}
+
+			tracker.StartTime, _ = time.Parse(time.RFC3339, metadata.StartTime)
+			tracker.EndTime, _ = time.Parse(time.RFC3339, metadata.EndTime)
+
+			// Generate and save smart commit
+			smartCommit := tracker.GenerateSmartCommit()
+			if err := tracker.SaveSmartCommit(); err != nil {
+				fmt.Printf("❌ Failed to save smart commit: %v\n", err)
+				os.Exit(1)
+			}
+
+			commitPath := filepath.Join(sessionDir, "smart_commit.txt")
+			fmt.Println("🎫 BITBUCKET SMART COMMIT:")
+			fmt.Printf("\n%s\n", smartCommit)
+			fmt.Printf("\nSaved to: %s\n", commitPath)
+			fmt.Println("\nCopy this message to use in your git commit for Bitbucket/Jira integration.")
 		},
 	}
 
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(analyzeCmd)
+	rootCmd.AddCommand(commitCmd)
 	rootCmd.AddCommand(stopCmd)
 
 	if err := rootCmd.Execute(); err != nil {
